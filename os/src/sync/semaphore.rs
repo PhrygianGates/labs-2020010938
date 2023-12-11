@@ -3,6 +3,7 @@
 use crate::sync::UPSafeCell;
 use crate::task::{block_current_and_run_next, current_task, wakeup_task, TaskControlBlock};
 use alloc::{collections::VecDeque, sync::Arc};
+use crate::sync::utils::get_next_queue_id;
 
 /// semaphore structure
 pub struct Semaphore {
@@ -16,6 +17,10 @@ pub struct SemaphoreInner {
 }
 
 impl Semaphore {
+    pub fn get_next_queue_id(&self) -> isize {
+        let inner = self.inner.exclusive_access();
+        get_next_queue_id(&inner.wait_queue)
+    }
     /// Create a new semaphore
     pub fn new(res_count: usize) -> Self {
         trace!("kernel: Semaphore::new");

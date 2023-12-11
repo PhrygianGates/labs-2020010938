@@ -49,6 +49,14 @@ pub struct ProcessControlBlockInner {
     pub semaphore_list: Vec<Option<Arc<Semaphore>>>,
     /// condvar list
     pub condvar_list: Vec<Option<Arc<Condvar>>>,
+
+    pub mutex_available: Vec<usize>,
+    pub semaphore_available: Vec<usize>,
+    pub mutex_allocation: Vec<Vec<usize>>,
+    pub semaphore_allocation: Vec<Vec<usize>>,
+    pub mutex_need: Vec<Vec<usize>>,
+    pub semaphore_need: Vec<Vec<usize>>,
+    pub deadlock_detect: bool,
 }
 
 impl ProcessControlBlockInner {
@@ -81,6 +89,38 @@ impl ProcessControlBlockInner {
     /// get a task with tid in this process
     pub fn get_task(&self, tid: usize) -> Arc<TaskControlBlock> {
         self.tasks[tid].as_ref().unwrap().clone()
+    }
+    pub fn check_deadlock_generic(
+        &self,
+        available_resources: &[usize],
+        need_matrix: &Vec<Vec<usize>>,
+        allocation_matrix: &Vec<Vec<usize>>,
+    ) -> isize {
+        let mut work = available_resources.to_vec();
+        let mut finish = vec![false; self.thread_count()];
+        
+        while let Some(i) = (0..self.thread_count()).find(|&i| {
+            !finish[i] && (0..work.len()).all(|j| need_matrix[i][j] <= work[j])
+        }) {
+            for j in 0..work.len() {
+                work[j] += allocation_matrix[i][j];
+            }
+            finish[i] = true;
+        }
+        
+        if finish.contains(&false) {
+            -0xDEAD
+        } else {
+            0
+        }
+    }
+    
+    pub fn check_deadlock_mutex(&self) -> isize {
+        self.check_deadlock_generic(&self.mutex_available, &self.mutex_need, &self.mutex_allocation)
+    }
+    
+    pub fn check_deadlock_semaphore(&self) -> isize {
+        self.check_deadlock_generic(&self.semaphore_available, &self.semaphore_need, &self.semaphore_allocation)
     }
 }
 
@@ -119,6 +159,13 @@ impl ProcessControlBlock {
                     mutex_list: Vec::new(),
                     semaphore_list: Vec::new(),
                     condvar_list: Vec::new(),
+                    mutex_available: Vec::new(),
+                    semaphore_available: Vec::new(),
+                    mutex_allocation: Vec::new(),
+                    semaphore_allocation: Vec::new(),
+                    mutex_need: Vec::new(),
+                    semaphore_need: Vec::new(),
+                    deadlock_detect: false,
                 })
             },
         });
@@ -130,6 +177,10 @@ impl ProcessControlBlock {
         ));
         // prepare trap_cx of main thread
         let task_inner = task.inner_exclusive_access();
+        process.inner_exclusive_access().mutex_allocation.push(vec![0;0]);
+        process.inner_exclusive_access().mutex_need.push(vec![0;0]);
+        process.inner_exclusive_access().semaphore_allocation.push(vec![0;0]);
+        process.inner_exclusive_access().semaphore_need.push(vec![0;0]);
         let trap_cx = task_inner.get_trap_cx();
         let ustack_top = task_inner.res.as_ref().unwrap().ustack_top();
         let kstack_top = task.kstack.get_top();
@@ -170,6 +221,18 @@ impl ProcessControlBlock {
         task_inner.res.as_mut().unwrap().ustack_base = ustack_base;
         task_inner.res.as_mut().unwrap().alloc_user_res();
         task_inner.trap_cx_ppn = task_inner.res.as_mut().unwrap().trap_cx_ppn();
+        let mut process_inner = self.inner_exclusive_access();
+        process_inner.mutex_available = Vec::new();
+        process_inner.semaphore_available =Vec::new();
+        process_inner.mutex_allocation =Vec::new();
+        process_inner.semaphore_allocation =Vec::new();
+        process_inner.mutex_need =Vec::new();
+        process_inner.semaphore_need =Vec::new();
+        process_inner.mutex_allocation.push(vec![0;0]);
+        process_inner.mutex_need.push(vec![0;0]);
+        process_inner.semaphore_allocation.push(vec![0;0]);
+        process_inner.semaphore_need.push(vec![0;0]);
+        drop(process_inner);
         // push arguments on user stack
         trace!("kernel: exec .. push arguments on user stack");
         let mut user_sp = task_inner.res.as_mut().unwrap().ustack_top();
@@ -245,6 +308,13 @@ impl ProcessControlBlock {
                     mutex_list: Vec::new(),
                     semaphore_list: Vec::new(),
                     condvar_list: Vec::new(),
+                    mutex_available: Vec::new(),
+                    semaphore_available: Vec::new(),
+                    mutex_allocation: Vec::new(),
+                    semaphore_allocation: Vec::new(),
+                    mutex_need: Vec::new(),
+                    semaphore_need: Vec::new(),
+                    deadlock_detect: false,
                 })
             },
         });
@@ -267,6 +337,10 @@ impl ProcessControlBlock {
         // attach task to child process
         let mut child_inner = child.inner_exclusive_access();
         child_inner.tasks.push(Some(Arc::clone(&task)));
+        child_inner.mutex_allocation.push(vec![0;0]);
+        child_inner.mutex_need.push(vec![0;0]);
+        child_inner.semaphore_allocation.push(vec![0;0]);
+        child_inner.semaphore_need.push(vec![0;0]);
         drop(child_inner);
         // modify kstack_top in trap_cx of this thread
         let task_inner = task.inner_exclusive_access();
