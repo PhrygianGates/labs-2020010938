@@ -1,7 +1,7 @@
 use alloc::{collections::VecDeque, sync::Arc};
 use crate::task::{TaskControlBlock};
 
-fn get_next_queue_id(wait_queue: &VecDeque<Arc<TaskControlBlock>>) -> isize {
+pub fn get_next_queue_id(wait_queue: &VecDeque<Arc<TaskControlBlock>>) -> isize {
     if wait_queue.is_empty() {
         -1
     } else {
